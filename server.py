@@ -7,6 +7,20 @@ import json
 # A set to keep track of all connected clients (websockets).
 CONNECTED_CLIENTS = set()
 
+async def health_check_handler(path, request_headers):
+    """
+    This function handles Render's health check requests.
+    If the path is anything other than a websocket endpoint, it returns a 200 OK.
+    This prevents the server from crashing when Render pings it.
+    """
+    # Render sends a GET request to the root path "/" to check health.
+    # We check if the "Upgrade" header is present. If not, it's a simple HTTP request.
+    if "Upgrade" not in request_headers:
+        # Return a simple HTTP 200 OK response.
+        return (websockets.http11.Response(200, "OK", b"OK"), None)
+    # If the "Upgrade" header is present, let the default handler process it as a WebSocket connection.
+    return None
+
 async def handler(websocket, path):
     """
     This function is called for each new client that connects.
@@ -52,10 +66,13 @@ async def main():
     # network interfaces, not just localhost. This is crucial for
     # allowing other computers on your network or the internet to connect.
     host = "0.0.0.0"
-    port = 8765
+    # Render provides the port to use in an environment variable.
+    # Default to 8765 if not provided (for local testing).
+    port = 10000
 
-    # Start the WebSocket server.
-    async with websockets.serve(handler, host, port):
+    # Start the WebSocket server with the new health check handler.
+    # The `process_request` argument is called for every incoming connection.
+    async with websockets.serve(handler, host, port, process_request=health_check_handler):
         print(f"WebSocket server started at ws://{host}:{port}")
         # The server will run forever until the program is stopped.
         await asyncio.Future()
