@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import asyncio
-import websockets
 import json
 import os
 from aiohttp import web, WSMsgType
