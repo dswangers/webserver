@@ -13,14 +13,16 @@ async def process_request(path, request_headers):
     This function handles Render's health check requests.
     If it's a standard HTTP request (not a WebSocket upgrade), it responds with 200 OK.
     """
-    # The 'request_headers' object has a 'headers' attribute which is a dictionary-like object.
-    # We check for the 'Upgrade' header within this attribute.
-    if "Upgrade" not in request_headers.headers:
-        # This is a standard HTTP request (like a health check).
-        # Return a simple HTTP 200 OK response.
-        return (websockets.http11.Response(200, "OK", b"OK"), None)
+    # Check if this is a WebSocket upgrade request
+    upgrade_header = request_headers.headers.get("Upgrade", "").lower()
+    connection_header = request_headers.headers.get("Connection", "").lower()
     
-    # If the "Upgrade" header is present, let the default handler process it as a WebSocket connection.
+    # If it's not a WebSocket upgrade request, treat it as a health check
+    if upgrade_header != "websocket" or "upgrade" not in connection_header:
+        # Return 200 OK for health checks (both GET and HEAD requests)
+        return (websockets.http11.Response(200, "OK", b"Health Check OK"), None)
+    
+    # If it is a WebSocket upgrade request, let the default handler process it
     return None
 
 async def handler(websocket, path):
@@ -55,6 +57,8 @@ async def handler(websocket, path):
 
     except websockets.exceptions.ConnectionClosedError:
         print(f"A client connection was closed unexpectedly.")
+    except websockets.exceptions.ConnectionClosedOK:
+        print(f"A client connection was closed normally.")
     finally:
         # Unregister the client upon disconnection.
         # Use a check to prevent errors if the client is already gone.
