@@ -3,27 +3,15 @@
 import asyncio
 import websockets
 import json
-import os # Import the os module
+import os
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # A set to keep track of all connected clients (websockets).
 CONNECTED_CLIENTS = set()
-
-async def process_request(path, request_headers):
-    """
-    This function handles Render's health check requests.
-    If it's a standard HTTP request (not a WebSocket upgrade), it responds with 200 OK.
-    """
-    # Check if this is a WebSocket upgrade request
-    upgrade_header = request_headers.headers.get("Upgrade", "").lower()
-    connection_header = request_headers.headers.get("Connection", "").lower()
-    
-    # If it's not a WebSocket upgrade request, treat it as a health check
-    if upgrade_header != "websocket" or "upgrade" not in connection_header:
-        # Return 200 OK for health checks (both GET and HEAD requests)
-        return (websockets.http11.Response(200, "OK", b"Health Check OK"), None)
-    
-    # If it is a WebSocket upgrade request, let the default handler process it
-    return None
 
 async def handler(websocket, path):
     """
@@ -33,13 +21,13 @@ async def handler(websocket, path):
     """
     # Register the new client by adding it to our set.
     CONNECTED_CLIENTS.add(websocket)
-    print(f"Client connected from {websocket.remote_address}. Total clients: {len(CONNECTED_CLIENTS)}")
+    logger.info(f"Client connected from {websocket.remote_address}. Total clients: {len(CONNECTED_CLIENTS)}")
     
     try:
         # This loop runs forever for each client, waiting for messages.
         # When the client disconnects, the loop will exit.
         async for message in websocket:
-            print(f"Received message from a client: {message}")
+            logger.info(f"Received message from a client: {message}")
             
             # Here, we will broadcast the received message to all other clients.
             # We create a list of tasks to send the message concurrently.
@@ -53,18 +41,20 @@ async def handler(websocket, path):
             # Run all the send tasks concurrently.
             if broadcast_tasks:
                 await asyncio.wait(broadcast_tasks)
-                print(f"Broadcasted message to {len(broadcast_tasks)} other clients.")
+                logger.info(f"Broadcasted message to {len(broadcast_tasks)} other clients.")
 
     except websockets.exceptions.ConnectionClosedError:
-        print(f"A client connection was closed unexpectedly.")
+        logger.info(f"A client connection was closed unexpectedly.")
     except websockets.exceptions.ConnectionClosedOK:
-        print(f"A client connection was closed normally.")
+        logger.info(f"A client connection was closed normally.")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
     finally:
         # Unregister the client upon disconnection.
         # Use a check to prevent errors if the client is already gone.
         if websocket in CONNECTED_CLIENTS:
             CONNECTED_CLIENTS.remove(websocket)
-            print(f"Client disconnected. Total clients: {len(CONNECTED_CLIENTS)}")
+            logger.info(f"Client disconnected. Total clients: {len(CONNECTED_CLIENTS)}")
 
 async def main():
     """
@@ -79,10 +69,23 @@ async def main():
     # We read it from there, defaulting to 10000 for local testing.
     port = int(os.environ.get("PORT", 10000))
 
-    # Start the WebSocket server with the new health check handler.
-    # The `process_request` argument is called for every incoming connection.
-    async with websockets.serve(handler, host, port, process_request=process_request):
-        print(f"WebSocket server started at ws://{host}:{port}")
+    # Start the WebSocket server with more lenient settings
+    start_server = websockets.serve(
+        handler,
+        host,
+        port,
+        # Make the server more tolerant of different request types
+        ping_interval=None,
+        ping_timeout=None,
+        close_timeout=None,
+        max_size=2**20,
+        max_queue=2**5,
+        read_limit=2**16,
+        write_limit=2**16,
+    )
+    
+    async with start_server:
+        logger.info(f"WebSocket server started at ws://{host}:{port}")
         # The server will run forever until the program is stopped.
         await asyncio.Future()
 
@@ -92,4 +95,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nServer is shutting down.")
+        logger.info("\nServer is shutting down.")
