@@ -3,21 +3,23 @@
 import asyncio
 import websockets
 import json
+import os # Import the os module
 
 # A set to keep track of all connected clients (websockets).
 CONNECTED_CLIENTS = set()
 
-async def health_check_handler(path, request_headers):
+async def process_request(path, request_headers):
     """
     This function handles Render's health check requests.
-    If the path is anything other than a websocket endpoint, it returns a 200 OK.
-    This prevents the server from crashing when Render pings it.
+    If it's a standard HTTP request (not a WebSocket upgrade), it responds with 200 OK.
     """
-    # Render sends a GET request to the root path "/" to check health.
-    # We check if the "Upgrade" header is present. If not, it's a simple HTTP request.
-    if "Upgrade" not in request_headers:
+    # The 'request_headers' object has a 'headers' attribute which is a dictionary-like object.
+    # We check for the 'Upgrade' header within this attribute.
+    if "Upgrade" not in request_headers.headers:
+        # This is a standard HTTP request (like a health check).
         # Return a simple HTTP 200 OK response.
         return (websockets.http11.Response(200, "OK", b"OK"), None)
+    
     # If the "Upgrade" header is present, let the default handler process it as a WebSocket connection.
     return None
 
@@ -55,8 +57,10 @@ async def handler(websocket, path):
         print(f"A client connection was closed unexpectedly.")
     finally:
         # Unregister the client upon disconnection.
-        CONNECTED_CLIENTS.remove(websocket)
-        print(f"Client disconnected. Total clients: {len(CONNECTED_CLIENTS)}")
+        # Use a check to prevent errors if the client is already gone.
+        if websocket in CONNECTED_CLIENTS:
+            CONNECTED_CLIENTS.remove(websocket)
+            print(f"Client disconnected. Total clients: {len(CONNECTED_CLIENTS)}")
 
 async def main():
     """
@@ -66,13 +70,14 @@ async def main():
     # network interfaces, not just localhost. This is crucial for
     # allowing other computers on your network or the internet to connect.
     host = "0.0.0.0"
-    # Render provides the port to use in an environment variable.
-    # Default to 8765 if not provided (for local testing).
-    port = 10000
+    
+    # Render provides the port to use in the 'PORT' environment variable.
+    # We read it from there, defaulting to 10000 for local testing.
+    port = int(os.environ.get("PORT", 10000))
 
     # Start the WebSocket server with the new health check handler.
     # The `process_request` argument is called for every incoming connection.
-    async with websockets.serve(handler, host, port, process_request=health_check_handler):
+    async with websockets.serve(handler, host, port, process_request=process_request):
         print(f"WebSocket server started at ws://{host}:{port}")
         # The server will run forever until the program is stopped.
         await asyncio.Future()
