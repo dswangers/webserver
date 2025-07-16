@@ -14,7 +14,6 @@ async def websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     
-    # Register the new client
     CONNECTED_CLIENTS.add(ws)
     print(f"Client connected. Total clients: {len(CONNECTED_CLIENTS)}")
     
@@ -23,25 +22,35 @@ async def websocket_handler(request):
             if msg.type == WSMsgType.TEXT:
                 message = msg.data
                 print(f"Received message: {message}")
-                
-                # Broadcast to all other clients
+
+                # Try to parse as JSON
+                try:
+                    data = json.loads(message)
+                except Exception:
+                    data = None
+
+                # If it's a getId request, reply only to this client
+                if data and data.get("type") == "getId":
+                    # You may want to attach userId to ws on login for more security
+                    await ws.send_str(json.dumps({"type": "id", "message": getattr(ws, "userId", None)}))
+                    continue
+
+                # Otherwise, broadcast to all other clients
                 broadcast_tasks = []
                 for client in CONNECTED_CLIENTS:
                     if client != ws and not client.closed:
                         broadcast_tasks.append(client.send_str(message))
-                
                 if broadcast_tasks:
                     await asyncio.gather(*broadcast_tasks, return_exceptions=True)
                     print(f"Broadcasted message to {len(broadcast_tasks)} other clients.")
-            
+
             elif msg.type == WSMsgType.ERROR:
                 print(f'WebSocket error: {ws.exception()}')
                 break
-    
+
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
-        # Unregister the client
         if ws in CONNECTED_CLIENTS:
             CONNECTED_CLIENTS.remove(ws)
             print(f"Client disconnected. Total clients: {len(CONNECTED_CLIENTS)}")
